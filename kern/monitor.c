@@ -25,6 +25,7 @@ struct Command {
 static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
+	{ "backtrace", "Display backtrace to current function call", mon_backtrace}
 };
 
 /***** Implementations of basic kernel monitor commands *****/
@@ -58,7 +59,33 @@ mon_kerninfo(int argc, char **argv, struct Trapframe *tf)
 int
 mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 {
-	// Your code here.
+	cprintf("Stack backtrace\n");
+
+	uint32_t ebp = 0;
+	uintptr_t eip = 0;
+	asm volatile("movl %%ebp,%0" : "=r" (ebp)); // now should be after prologue
+
+	while(ebp != 0) // in entry.S, ebp got initialized to 0, where we should stop
+	{
+		eip = (uintptr_t)*((uint32_t *)ebp + 1);
+		struct Eipdebuginfo debuginfo = {NULL, 0, NULL, 0, 0,  0};
+		if (debuginfo_eip(eip, &debuginfo) == -1)
+			return -1;
+
+		int fn_name_len = debuginfo.eip_fn_namelen;
+		char fn_name[fn_name_len + 1];
+		const char *eip_fn_name = debuginfo.eip_fn_name;
+		for (int i = 0; i < fn_name_len; i ++)
+		{
+			fn_name[i] = eip_fn_name[i];
+		}
+		fn_name[fn_name_len] = '\0';
+		cprintf("ebp %08x  eip %08x  args %08x %08x %08x %08x %08x\n\n  \t\t%s:%d: %s+%d\n",
+			         ebp, eip, *((uint32_t *)ebp + 2), *((uint32_t *)ebp + 3), *((uint32_t *)ebp + 4), *((uint32_t *)ebp + 5), *((uint32_t *)ebp + 6),
+			         debuginfo.eip_file, debuginfo.eip_line, fn_name, debuginfo.eip_fn_narg);
+		ebp = *(uint32_t *)ebp;
+	}
+
 	return 0;
 }
 
