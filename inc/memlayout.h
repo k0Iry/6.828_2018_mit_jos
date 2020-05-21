@@ -160,6 +160,9 @@ typedef uint32_t pde_t;
  * A second consequence is that the contents of the current page directory
  * will always be available at virtual address (UVPT + (UVPT >> PGSHIFT)), to
  * which uvpd is set in lib/entry.S.
+ *
+ * One of the PDEs points to the PD itself, other (2^10 - 1) PDEs point to (2^10 - 1) pages
+ *
  */
 extern volatile pte_t uvpt[];     // VA of "virtual page table"
 extern volatile pde_t uvpd[];     // VA of current page directory
@@ -189,3 +192,4 @@ struct PageInfo {
 
 #endif /* !__ASSEMBLER__ */
 #endif /* !JOS_INC_MEMLAYOUT_H */
+

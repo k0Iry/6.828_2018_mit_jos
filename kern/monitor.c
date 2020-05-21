@@ -11,6 +11,7 @@
 #include <kern/monitor.h>
 #include <kern/kdebug.h>
 #include <kern/trap.h>
+#include <kern/pmap.h>
 
 #define CMDBUF_SIZE	80	// enough for one VGA text line
 
@@ -25,7 +26,8 @@ struct Command {
 static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
-	{ "backtrace", "Display backtrace to current function call", mon_backtrace}
+	{ "backtrace", "Display backtrace to current function call", mon_backtrace},
+	{ "showmappings", "Display memory mappings in current active address space", mon_showmappings}
 };
 
 /***** Implementations of basic kernel monitor commands *****/
@@ -89,7 +91,41 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 	return 0;
 }
 
+int mon_showmappings(int argc, char **argv, struct Trapframe *tf)
+{
+	if (argc != 3)
+	{
+		cprintf("usage: showmappings <low_addr> <high_addr>, addresses are virtual\n");
+		return 1;
+	}
 
+	uintptr_t low_addr = (uintptr_t)strtol(argv[1], NULL, 16);
+	uintptr_t high_addr = (uintptr_t)strtol(argv[2], NULL, 16);
+	if (low_addr > high_addr)
+		return 1;
+
+	extern pde_t entry_pgdir[];
+	cprintf("Show mappings between 0x%08x and 0x%08x\n", low_addr, high_addr);
+
+	size_t range = (high_addr - low_addr) / PGSIZE;
+
+	for (int i = 0; i <= range; i++)
+	{
+		pte_t *pgtbl_entry = NULL;
+		const void *vir_addr = (const void *)(low_addr + i * PGSIZE);
+		if (!(pgtbl_entry = pgdir_walk(entry_pgdir, vir_addr, 0)))
+		{
+			if (!(pgtbl_entry = pgdir_walk(kern_pgdir, vir_addr, 0)))
+			{
+				cprintf("Invalid mappings, perhaps accessing USER level, not supported yet\n");
+				return 1;
+			}
+		}
+		cprintf("\tVirtual address 0x%08x mapped to physical address 0x%08x\n", vir_addr, PTE_ADDR(*pgtbl_entry) + PGOFF(vir_addr));
+	}
+
+	return 0;
+}
 
 /***** Kernel monitor command interpreter *****/
 

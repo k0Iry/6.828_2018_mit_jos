@@ -55,7 +55,7 @@
 #define PDXSHIFT	22		// offset of PDX in a linear address
 
 // Page table/directory entry flags.
-#define PTE_P		0x001	// Present
+#define PTE_P		0x001	// Present Indicates whether the page or page table being pointed to by the entry is currently loaded in physical memory.
 #define PTE_W		0x002	// Writeable
 #define PTE_U		0x004	// User
 #define PTE_PWT		0x008	// Write-Through
@@ -73,7 +73,7 @@
 #define PTE_SYSCALL	(PTE_AVAIL | PTE_P | PTE_W | PTE_U)
 
 // Address in page table or page directory entry
-#define PTE_ADDR(pte)	((physaddr_t) (pte) & ~0xFFF)
+#define PTE_ADDR(pte)	((physaddr_t) (pte) & ~0xFFF) // purge tags
 
 // Control Register flags
 #define CR0_PE		0x00000001	// Protection Enable
