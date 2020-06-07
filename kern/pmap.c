@@ -123,6 +123,8 @@ boot_alloc(uint32_t n)
 	result = nextfree;
 	nextfree += ROUNDUP(n, PGSIZE);
 	cprintf("nextfree now is %p\n", nextfree);
+	cprintf("result is %p\n", result);
+	cprintf("kern_pgdir is here: %p\n", &kern_pgdir);
 
 
 	return result;
