@@ -248,6 +248,13 @@ read_tsc(void)
 	return tsc;
 }
 
+static inline void
+wrmsr(uint32_t msr, uint32_t eax, uint32_t edx)
+{
+	asm volatile("wrmsr"
+		: :"c" (msr), "a" (eax), "d" (edx));
+}
+
 static inline uint32_t
 xchg(volatile uint32_t *addr, uint32_t newval)
 {

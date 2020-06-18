@@ -31,6 +31,9 @@ struct Pseudodesc idt_pd = {
 	sizeof(idt) - 1, (uint32_t) idt
 };
 
+typedef void (*trap_handler)(void);
+
+extern trap_handler default_handlers[];
 
 static const char *trapname(int trapno)
 {
@@ -71,8 +74,29 @@ void
 trap_init(void)
 {
 	extern struct Segdesc gdt[];
+	extern void sysenter_handler();
 
 	// LAB 3: Your code here.
+	wrmsr(0x174, GD_KT, 0);		// set (CPL = 0) CS & SS
+	wrmsr(0x176, (uint32_t)sysenter_handler, 0);		// the sysenter handler address
+	wrmsr(0x175, KSTACKTOP, 0);	// the stack where we drop in when trapped into kernel
+
+	int vector = 0;
+	for (; vector < 32; vector++)
+	{
+		// 0-31 for TRAPs
+		if (vector == T_BRKPT)
+		{
+			SETGATE(idt[vector], 1, GD_KT, default_handlers[vector], gdt[GD_UT >> 3].sd_dpl);
+			continue;
+		}
+		SETGATE(idt[vector], 1, GD_KT, default_handlers[vector], gdt[GD_KT >> 3].sd_dpl);
+	}
+	for (; vector < 256; vector++)
+	{
+		// 32 - 255 for IRQs (user defined)
+		SETGATE(idt[vector], 0, GD_KT, default_handlers[vector], gdt[GD_UT >> 3].sd_dpl);
+	}
 
 	// Per-CPU setup 
 	trap_init_percpu();
@@ -177,6 +201,24 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
+	if (tf->tf_trapno == T_PGFLT)
+		page_fault_handler(tf);
+	if (tf->tf_trapno == T_BRKPT)
+	{
+		// enable single-step mode for debugging,
+		// a debug exception will be generated
+		// after each instruction
+		tf->tf_eflags |= 0x100;
+		monitor(tf);
+	}
+	if (tf->tf_trapno == T_DEBUG)
+		monitor(tf);
+	if (tf->tf_trapno == T_SYSCALL)
+	{
+		tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx,
+				tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+		return;
+	}
 
 	// Handle spurious interrupts
 	// The hardware sometimes raises these because of noise on the
@@ -281,6 +323,11 @@ page_fault_handler(struct Trapframe *tf)
 	// Handle kernel-mode page faults.
 
 	// LAB 3: Your code here.
+	if (tf->tf_cs == GD_KT)
+	{
+		print_trapframe(tf);
+		panic("page fault happens in kernel mode");
+	}
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.

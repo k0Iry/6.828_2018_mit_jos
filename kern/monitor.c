@@ -27,7 +27,8 @@ static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
 	{ "backtrace", "Display backtrace to current function call", mon_backtrace},
-	{ "showmappings", "Display memory mappings in current active address space", mon_showmappings}
+	{ "showmappings", "Display memory mappings in current active address space", mon_showmappings},
+	{ "debug", "Debug purpose", mon_debug}
 };
 
 /***** Implementations of basic kernel monitor commands *****/
@@ -109,20 +110,53 @@ int mon_showmappings(int argc, char **argv, struct Trapframe *tf)
 
 	size_t range = (high_addr - low_addr) / PGSIZE;
 
-	for (int i = 0; i <= range; i++)
+	for (int i = 0; i < range; i++)
 	{
 		pte_t *pgtbl_entry = NULL;
 		const void *vir_addr = (const void *)(low_addr + i * PGSIZE);
-		if (!(pgtbl_entry = pgdir_walk(entry_pgdir, vir_addr, 0)))
+		if (!(pgtbl_entry = pgdir_walk(entry_pgdir, vir_addr, 0)) || !(*pgtbl_entry & PTE_P))
 		{
-			if (!(pgtbl_entry = pgdir_walk(kern_pgdir, vir_addr, 0)))
+			if (!(pgtbl_entry = pgdir_walk(kern_pgdir, vir_addr, 0)) || !(*pgtbl_entry & PTE_P))
 			{
-				cprintf("Invalid mappings, perhaps accessing USER level, not supported yet\n");
-				return 1;
+				cprintf("Invalid mappings at 0x%08x, perhaps accessing USER level, not supported yet\n", vir_addr);
+				continue;
 			}
 		}
 		cprintf("\tVirtual address 0x%08x mapped to physical address 0x%08x\n", vir_addr, PTE_ADDR(*pgtbl_entry) + PGOFF(vir_addr));
 	}
+
+	return 0;
+}
+
+int mon_debug(int argc, char **argv, struct Trapframe *tf)
+{
+	if (tf == NULL)
+	{
+		cprintf("No user process is running!\n");
+		return 0;
+	}
+
+	const char *helpmsg = "usage debug, subcommand 'si' for single-step debug, 'continue' for continue till end or next breakpoint\n";
+
+	if (argc != 2)
+	{
+		cprintf("%s", helpmsg);
+		return 0;
+	}
+
+	extern void env_pop_tf(struct Trapframe *tf);
+	if (strncmp("si", argv[1], 10) == 0)
+	{
+		env_pop_tf(tf);
+	}
+	if (strncmp("continue", argv[1], 10) == 0)
+	{
+		// clear TF flag to disable IRQ1
+		tf->tf_eflags &= ~0x100;
+		env_pop_tf(tf);
+	}
+
+	cprintf("%s", helpmsg);
 
 	return 0;
 }

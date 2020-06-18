@@ -37,28 +37,58 @@ syscall(int num, int check, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 	return ret;
 }
 
+static inline int32_t
+sysenter(int num, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4)
+{
+	// fast system call: pass system call number in AX,
+	// up to 4 parameters in DX, CX, BX, DI
+	//
+	// Interrupt kernel with MSR (CPL = 0).
+	//
+	// https://reverseengineering.stackexchange.com/questions/2869/how-to-use-sysenter-under-linux
+
+    int32_t ret;
+	asm volatile(
+		        "pushl %%ebp\n\t"
+		        "movl  %%esp, %%ebp\n\t"
+		        "leal  sysenter_ret%=, %%esi\n\t"
+		        "sysenter\n\t"
+		        "sysenter_ret%=:"
+		        "popl %%ebp\n\t"
+		        : "=a" (ret) :
+		            "a" (num),
+		            "d" (a1),
+		            "c" (a2),
+		            "b" (a3),
+		            "D" (a4)
+		        : "%esi", "memory", "cc");
+
+	return ret;
+}
+
 void
 sys_cputs(const char *s, size_t len)
 {
-	syscall(SYS_cputs, 0, (uint32_t)s, len, 0, 0, 0);
+	sysenter(SYS_cputs, (uint32_t)s, len, 0, 0);
 }
 
 int
 sys_cgetc(void)
 {
-	return syscall(SYS_cgetc, 0, 0, 0, 0, 0, 0);
+	return sysenter(SYS_cgetc, 0, 0, 0, 0);
 }
 
 int
 sys_env_destroy(envid_t envid)
 {
-	return syscall(SYS_env_destroy, 1, envid, 0, 0, 0, 0);
+	return sysenter(SYS_env_destroy, envid, 0, 0, 0);
 }
 
 envid_t
 sys_getenvid(void)
 {
-	 return syscall(SYS_getenvid, 0, 0, 0, 0, 0, 0);
+	 return sysenter(SYS_getenvid, 0, 0, 0, 0);
+	 // return syscall(SYS_getenvid, 0, 0, 0, 0, 0, 0);
 }
 
 void
