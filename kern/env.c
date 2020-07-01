@@ -55,7 +55,7 @@ struct Segdesc gdt[NCPU + 5] =
 
 	// Per-CPU TSS descriptors (starting from GD_TSS0) are initialized
 	// in trap_init_percpu()
-	[GD_TSS0 >> 3] = SEG_NULL
+	// [GD_TSS0 >> 3] = SEG_NULL
 };
 
 struct Pseudodesc gdt_pd = {
@@ -189,10 +189,10 @@ env_setup_vm(struct Env *e)
 
 	// LAB 3: Your code here.
 	p->pp_ref++;
-	e->env_pgdir = (pte_t *)page2kva(p);
+	e->env_pgdir = (pde_t *)page2kva(p);
 	// we can copy kern part of PDEs from kern_pgdir
 	// no need to allocate more physical memory and map again
-	for (int start = PDX(UTOP); start < 1024; start ++)
+	for (int start = PDX(UTOP); start < NPDENTRIES; start ++)
 	{
 		e->env_pgdir[start] = kern_pgdir[start];
 	}
@@ -262,6 +262,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 
 	// Enable interrupts while in user mode.
 	// LAB 4: Your code here.
+	e->env_tf.tf_eflags |= FL_IF;
 
 	// Clear the page fault handler until user installs one.
 	e->env_pgfault_upcall = 0;
@@ -303,11 +304,16 @@ region_alloc(struct Env *e, void *va, size_t len)
 	{
 		pte_t *pgtbl = pgdir_walk(e->env_pgdir, (const void *)va, 1);
 		struct PageInfo *pg_info = NULL;
-		if (!(*pgtbl & PTE_P))	// for already-mapped page, we don't init it in any way
+		if (pgtbl && !(*pgtbl & PTE_P))	// for already-mapped page, we don't init it in any way
 			pg_info = page_alloc(ALLOC_ZERO);
 		if (pg_info == NULL)
 			panic("page_alloc: %e", -E_NO_MEM);
-		*pgtbl = page2pa(pg_info) | PTE_P | PTE_U | PTE_W;
+		// previously I only did the update of page table entry
+		// but I ignored the reference count of physical pages,
+		// so when a process fork child processes, the page that
+		// contains the code & data will be freed and then re-alloc,
+		// which will cause undefined behaviors among processes running
+		page_insert(e->env_pgdir, pg_info, (void *)va, PTE_U | PTE_W);
 	}
 }
 
@@ -555,8 +561,7 @@ env_run(struct Env *e)
 	curenv->env_runs ++;
 
 	lcr3(PADDR(curenv->env_pgdir));
+	unlock_kernel();
 	env_pop_tf(&(curenv->env_tf));
-
-	// panic("env_run not yet implemented");
 }
 

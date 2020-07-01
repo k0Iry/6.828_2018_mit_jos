@@ -54,7 +54,6 @@ SECTIONS
 		*(COMMON)
 		PROVIDE(end = .);
 	}
-	PROVIDE(end = .);
 
 
 	/DISCARD/ : {

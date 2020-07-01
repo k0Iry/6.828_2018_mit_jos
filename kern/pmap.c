@@ -295,6 +295,11 @@ mem_init_mp(void)
 	//
 	// LAB 4: Your code here:
 
+	for (int i = 0; i < NCPU; i++)
+	{
+		uintptr_t kstacktop = KSTACKTOP - i * (KSTKSIZE + KSTKGAP);
+		boot_map_region(kern_pgdir, kstacktop - KSTKSIZE, KSTKSIZE, PADDR(percpu_kstacks[i]), PTE_W);
+	}
 }
 
 // --------------------------------------------------------------
@@ -335,9 +340,16 @@ page_init(void)
 	// free pages!
 	pages[0].pp_ref = 1;
 	pages[0].pp_link = NULL;
+
+	size_t mpentry_pgnum = PGNUM(MPENTRY_PADDR);
+	pages[mpentry_pgnum].pp_ref = 1;
+	pages[mpentry_pgnum].pp_link = NULL;
+	
 	size_t i;
 	for (i = 1; i < npages_basemem; i++)
 	{
+		if (i == mpentry_pgnum)
+			continue;
 		pages[i].pp_ref = 0;
 		pages[i].pp_link = page_free_list;
 		page_free_list = &pages[i];
@@ -553,17 +565,18 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 	if (pg_tbl_entry != NULL)
 	{
 		physaddr_t pa = page2pa(pp);
-		if (PTE_ADDR(*pg_tbl_entry) == pa)
+		if (*pg_tbl_entry & PTE_P)
 		{
-			// do not free the page
-			pp->pp_ref--;
-			tlb_invalidate(pgdir, va);
+			if (PTE_ADDR(*pg_tbl_entry) == pa)
+			{
+				pp->pp_ref--;
+				tlb_invalidate(pgdir, va);
+			}
+			else
+			{
+				page_remove(pgdir, va);
+			}
 		}
-		else if (*pg_tbl_entry & PTE_P)
-		{
-			page_remove(pgdir, va);
-		}
-		
 		*pg_tbl_entry = pa | perm | PTE_P;
 		pp->pp_ref++;
 	}
@@ -680,7 +693,19 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+	physaddr_t pa_page_start = ROUNDDOWN(pa, PGSIZE);	// physical page including the pa
+	physaddr_t pa_page_end = ROUNDUP(pa + size, PGSIZE);	// physical page end
+	size = pa_page_end - pa_page_start;		// update size, should now be multiple of PGSIZE
+	if (base + size < MMIOLIM)
+	{
+		boot_map_region(kern_pgdir, base, size, pa_page_start, PTE_PCD | PTE_PWT | PTE_W);
+		base += size;
+		return (void *)(base - size);
+	}
+	else
+	{
+		panic("exceeding MMIOLIM...");
+	}
 }
 
 static uintptr_t user_mem_check_addr;
@@ -718,7 +743,7 @@ user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 		}
 
 		pte_t *pgtbl_entry = pgdir_walk(env->env_pgdir, (const void *)pg, 0);
-		if (!pgtbl_entry || !(*pgtbl_entry & perm))
+		if (!pgtbl_entry || !(*pgtbl_entry & perm) || !(*pgtbl_entry & PTE_P))
 		{
 			user_mem_check_addr = pg == start ? (uintptr_t)va : pg;
 			return -E_FAULT;
@@ -738,7 +763,17 @@ user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 void
 user_mem_assert(struct Env *env, const void *va, size_t len, int perm)
 {
-	if (user_mem_check(env, va, len, perm | PTE_U) < 0) {
+	if (user_mem_check(env, va, len, perm) < 0) {
+		cprintf("[%08x] user_mem_check assertion failure for "
+			"va %08x\n", env->env_id, user_mem_check_addr);
+		env_destroy(env);	// may not return
+	}
+	if (user_mem_check(env, va, len, PTE_U) < 0) {
+		cprintf("[%08x] user_mem_check assertion failure for "
+			"va %08x\n", env->env_id, user_mem_check_addr);
+		env_destroy(env);	// may not return
+	}
+	if (user_mem_check(env, va, len, PTE_P) < 0) {
 		cprintf("[%08x] user_mem_check assertion failure for "
 			"va %08x\n", env->env_id, user_mem_check_addr);
 		env_destroy(env);	// may not return

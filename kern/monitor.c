@@ -145,14 +145,20 @@ int mon_debug(int argc, char **argv, struct Trapframe *tf)
 	}
 
 	extern void env_pop_tf(struct Trapframe *tf);
+	extern struct spinlock kernel_lock;
+	void spin_unlock(struct spinlock *lk);
 	if (strncmp("si", argv[1], 10) == 0)
 	{
+		spin_unlock(&kernel_lock);
+		asm volatile("pause");
 		env_pop_tf(tf);
 	}
 	if (strncmp("continue", argv[1], 10) == 0)
 	{
 		// clear TF flag to disable IRQ1
 		tf->tf_eflags &= ~0x100;
+		spin_unlock(&kernel_lock);
+		asm volatile("pause");
 		env_pop_tf(tf);
 	}
 

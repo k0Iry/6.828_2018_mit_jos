@@ -33,8 +33,6 @@ struct Pseudodesc idt_pd = {
 
 typedef void (*trap_handler)(void);
 
-extern trap_handler default_handlers[];
-
 static const char *trapname(int trapno)
 {
 	static const char * const excnames[] = {
@@ -74,12 +72,9 @@ void
 trap_init(void)
 {
 	extern struct Segdesc gdt[];
-	extern void sysenter_handler();
+	extern trap_handler default_handlers[];
 
 	// LAB 3: Your code here.
-	wrmsr(0x174, GD_KT, 0);		// set (CPL = 0) CS & SS
-	wrmsr(0x176, (uint32_t)sysenter_handler, 0);		// the sysenter handler address
-	wrmsr(0x175, KSTACKTOP, 0);	// the stack where we drop in when trapped into kernel
 
 	int vector = 0;
 	for (; vector < 32; vector++)
@@ -87,10 +82,14 @@ trap_init(void)
 		// 0-31 for TRAPs
 		if (vector == T_BRKPT)
 		{
-			SETGATE(idt[vector], 1, GD_KT, default_handlers[vector], gdt[GD_UT >> 3].sd_dpl);
+			// breakpoint exception should be able to trigger under CPL=3 (user mode)
+			SETGATE(idt[vector], 0, GD_KT, default_handlers[vector], gdt[GD_UT >> 3].sd_dpl);
 			continue;
 		}
-		SETGATE(idt[vector], 1, GD_KT, default_handlers[vector], gdt[GD_KT >> 3].sd_dpl);
+		// so we reset IF flag
+		// e.g. when we enable IRQ for user environment, we first got trapped in irq_x,
+		// and we don't clear IF, then we might got another irq_y when handling irq_x
+		SETGATE(idt[vector], 0, GD_KT, default_handlers[vector], gdt[GD_KT >> 3].sd_dpl);
 	}
 	for (; vector < 256; vector++)
 	{
@@ -130,21 +129,27 @@ trap_init_percpu(void)
 	// user space on that CPU.
 	//
 	// LAB 4: Your code here:
+	uintptr_t kstacktop_percpu = (uintptr_t)percpu_kstacks[thiscpu->cpu_id] + KSTKSIZE;
+
+	extern void sysenter_handler();
+	wrmsr(MSR_IA32_SYSENTER_CS, GD_KT, 0);		// set (CPL = 0) CS & SS
+	wrmsr(MSR_IA32_SYSENTER_EIP, (uint32_t)sysenter_handler, 0);		// the sysenter handler address
+	wrmsr(MSR_IA32_SYSENTER_ESP, kstacktop_percpu, 0);	// the stack where we drop in when trapped into kernel
 
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
-	ts.ts_esp0 = KSTACKTOP;
-	ts.ts_ss0 = GD_KD;
-	ts.ts_iomb = sizeof(struct Taskstate);
+	thiscpu->cpu_ts.ts_esp0 = kstacktop_percpu;
+	thiscpu->cpu_ts.ts_ss0 = GD_KD;
+	thiscpu->cpu_ts.ts_iomb = (uint16_t)0xFFFF;
 
 	// Initialize the TSS slot of the gdt.
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),
 					sizeof(struct Taskstate) - 1, 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id].sd_s = 0;
 
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0);
+	ltr(GD_TSS0 + (thiscpu->cpu_id << 3)); // see env gdt init
 
 	// Load the IDT
 	lidt(&idt_pd);
@@ -232,6 +237,19 @@ trap_dispatch(struct Trapframe *tf)
 	// Handle clock interrupts. Don't forget to acknowledge the
 	// interrupt using lapic_eoi() before calling the scheduler!
 	// LAB 4: Your code here.
+	if (tf->tf_trapno >= IRQ_OFFSET && tf->tf_trapno < IRQ_OFFSET + 16)
+	{
+		lapic_eoi();
+		switch (tf->tf_trapno)
+		{
+		case IRQ_OFFSET + IRQ_TIMER:
+			sched_yield();
+			break;
+
+		default:
+			break;
+		}
+	}
 
 	// Add time tick increment to clock interrupts.
 	// Be careful! In multiprocessors, clock interrupts are
@@ -278,6 +296,15 @@ trap(struct Trapframe *tf)
 		// Acquire the big kernel lock before doing any
 		// serious kernel work.
 		// LAB 4: Your code here.
+		lock_kernel();
+
+		// Question 2: Why do we still need separate kernel stacks for each CPU?
+		// Answer: 
+		// 1. CPU 0 got interrupted into the kernel from user space, it will push tf_0 on single stack 
+		// 2. CPU 1 got interrupted too, then tf_1 is pushed on stack, and wait for irq_0 return (CPU 0 holding the lock)
+		// 3. irq_0 return, it will pop tf_1 out and try to restore user state, but what it should pop is tf_0
+		// more: https://stackoverflow.com/a/13953815/6289529
+
 		assert(curenv);
 
 		// Garbage collect if current enviroment is a zombie
@@ -362,7 +389,36 @@ page_fault_handler(struct Trapframe *tf)
 	//   (the 'tf' variable points at 'curenv->env_tf').
 
 	// LAB 4: Your code here.
+	if (curenv->env_pgfault_upcall == NULL)
+		goto end;
 
+	struct UTrapframe *utf = (struct UTrapframe *)UXSTACKTOP;
+	if (ROUNDUP(tf->tf_esp, PGSIZE) == UXSTACKTOP)
+	{
+		// recursive user exception
+		uint32_t *empty_word = (uint32_t *)(tf->tf_esp - 4);
+		*empty_word = 0;
+		utf = (struct UTrapframe *)empty_word;
+	}
+	utf -= 1; // reserve space for UTrapframe
+	// before we actually make any writing, we check the memory
+	//
+	// Note: we are currently under kernel mode, if we fail below
+	// memory access, we end up with a fault in kernel mode, which
+	// definitely panic the kernel, so we have to be very careful,
+	// we cannot check too early or too late
+	user_mem_assert(curenv, utf, sizeof(struct UTrapframe), PTE_W);
+	utf->utf_fault_va = fault_va;
+	utf->utf_err = tf->tf_err;
+	utf->utf_regs = tf->tf_regs;
+	utf->utf_eip = tf->tf_eip;
+	utf->utf_eflags = tf->tf_eflags;
+	utf->utf_esp = tf->tf_esp;
+
+	tf->tf_esp = (uintptr_t)&utf->utf_fault_va;
+	tf->tf_eip = (uintptr_t)curenv->env_pgfault_upcall;
+	env_run(curenv);
+end:
 	// Destroy the environment that caused the fault.
 	cprintf("[%08x] user fault va %08x ip %08x\n",
 		curenv->env_id, fault_va, tf->tf_eip);

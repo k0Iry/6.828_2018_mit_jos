@@ -30,6 +30,32 @@
 #define RELOC(x) ((x) - KERNBASE)
 #define MPBOOTPHYS(s) ((s) - mpentry_start + MPENTRY_PADDR)
 
+# MPBOOTPHYS is needed since mpentry.S is compiled and then linked to above KERNBASE
+# we cannot relay on this to calculate the global variables' addresses, current CPU
+# cannot dereference addresses that not even existed to it, it doesn't execute at linking
+# address
+
+# why boot.S doesn't need something like that? because boot loader is loaded and linked
+# at the same low address
+
+/* root@fb1f4f0cba44:/usr/src/app/lab# objdump -h obj/boot/boot.out
+
+obj/boot/boot.out:     file format elf32-i386
+
+Sections:
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .text         0000019f  00007c00  00007c00  00000074  2**2
+                  CONTENTS, ALLOC, LOAD, CODE
+  1 .eh_frame     000000a8  00007da0  00007da0  00000214  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  2 .stab         00000870  00000000  00000000  000002bc  2**2
+                  CONTENTS, READONLY, DEBUGGING
+  3 .stabstr      00000898  00000000  00000000  00000b2c  2**0
+                  CONTENTS, READONLY, DEBUGGING
+  4 .comment      0000002d  00000000  00000000  000013c4  2**0
+                  CONTENTS, READONLY
+*/
+
 .set PROT_MODE_CSEG, 0x8	# kernel code segment selector
 .set PROT_MODE_DSEG, 0x10	# kernel data segment selector
 
@@ -60,6 +86,10 @@ start32:
 	movw    %ax, %fs
 	movw    %ax, %gs
 
+	# just like cpu0, we enable PTE_PS bit
+	movl    %cr4, %eax
+	orl     $(CR4_PSE), %eax  # enable superpages (4MB)
+	movl    %eax, %cr4
 	# Set up initial page table. We cannot use kern_pgdir yet because
 	# we are still running at a low EIP.
 	movl    $(RELOC(entry_pgdir)), %eax
