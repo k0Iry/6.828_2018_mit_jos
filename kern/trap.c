@@ -246,6 +246,14 @@ trap_dispatch(struct Trapframe *tf)
 			sched_yield();
 			break;
 
+		case IRQ_OFFSET + IRQ_KBD:
+			kbd_intr();
+			return;
+
+		case IRQ_OFFSET + IRQ_SERIAL:
+			serial_intr();
+			return;
+		
 		default:
 			break;
 		}
@@ -317,6 +325,17 @@ trap(struct Trapframe *tf)
 		// Copy trap frame (which is currently on the stack)
 		// into 'curenv->env_tf', so that running the environment
 		// will restart at the trap point.
+
+		// The reason for this copy: difference from xv6
+		// in xv6, each process(env) has its own kernel stack, so each process(env) can
+		// always rely on its own stack even during task switch, since task switch always switch kernel stack.
+
+		// But in JOS here, each CPU got its own kernel stack instead of each process(env), process(env) only keeps a
+		// *snapshot* of trapframe when it gets trapped into the kernel, so that kernel
+		// can freely do task switch without worrying about the stack switch (we do switch always in env_run()).
+		// If we don't do this copy, only keep the pointer, when a timer interrupt comes in, the kernel stack would be
+		// replaced with another process's state, once we re-run the previous one, it will use the state from another
+		// process(env), which definitely is wrong!
 		curenv->env_tf = *tf;
 		// The trapframe on the stack should be ignored from here on.
 		tf = &curenv->env_tf;

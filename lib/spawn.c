@@ -11,6 +11,19 @@ static int map_segment(envid_t child, uintptr_t va, size_t memsz,
 		       int fd, size_t filesz, off_t fileoffset, int perm);
 static int copy_shared_pages(envid_t child);
 
+/****
+Think about what you would have to do in order to implement exec in user space,
+and be sure you understand why it is harder.
+
+Well, if we're going to implement some routine like 'exec', one big prerequsite
+is that we need to make sure we run under current process's context. Then it needs
+to find someway to replace itself with new binary image file, which means we have
+to be in the kernel mode to do that, otherwise how to maintain the correctness
+during the procedure of replacing? Then we need to of course update our page tables
+with newly added physical memory pages for new image, and also be sure to free the
+old image's physical memory occupation
+*****/
+
 // Spawn a child process from a program image loaded from the file system.
 // prog: the pathname of the program to run.
 // argv: pointer to null-terminated array of pointers to strings,
@@ -270,7 +283,7 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
 	//cprintf("map_segment %x+%x\n", va, memsz);
 
 	if ((i = PGOFF(va))) {
-		va -= i;
+		va -= i;		// ROUNDDOWN
 		memsz += i;
 		filesz += i;
 		fileoffset -= i;
@@ -302,6 +315,20 @@ static int
 copy_shared_pages(envid_t child)
 {
 	// LAB 5: Your code here.
+	int r;
+	void *addr = 0;
+	for (uint32_t i = 0; i < UTOP / PGSIZE; i ++)
+	{
+		addr = (void *)(i * PGSIZE);
+		if ((uvpd[PDX(addr)] & PTE_P) && (uvpt[i] & PTE_P))
+		{
+			if (uvpt[i] & PTE_SHARE)
+			{
+				if ((r = sys_page_map(0, addr, child, addr, PTE_SYSCALL & uvpt[i])) != 0)
+					panic("copy_shared_pages: sys_page_map data: %e", r);
+			}
+		}
+	}
 	return 0;
 }
 

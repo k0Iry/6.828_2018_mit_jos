@@ -27,11 +27,11 @@ pgfault(struct UTrapframe *utf)
 	// LAB 4: Your code here.
 	if ((err & FEC_WR) != FEC_WR)
 	{
-		panic("Access is not writing, err code %d\n", err);
+		panic("Access to addr 0x%x is not writing, err code %d\n", addr, err);
 	}
 	if ((uvpt[PGNUM(addr)] & PTE_COW) != PTE_COW)
 	{
-		panic("Fault address not marked as Copy-on-Write");
+		panic("Fault address 0x%x not marked as Copy-on-Write", addr);
 	}
 
 	// Allocate a new page, map it at a temporary location (PFTEMP),
@@ -41,16 +41,18 @@ pgfault(struct UTrapframe *utf)
 	//   You should make three system calls.
 
 	// LAB 4: Your code here.
-	envid_t envid = sys_getenvid();
+	// envid_t envid = sys_getenvid();
 	// cprintf("fault addr 0x%x, envid %x\n", addr, envid);
 	addr = ROUNDDOWN(addr, PGSIZE);	// page-size aligned
 
-	if ((r = sys_page_alloc(envid, PFTEMP, PTE_P | PTE_U | PTE_W)) != 0)
+	if ((r = sys_page_alloc(0, PFTEMP, PTE_P | PTE_U | PTE_W)) != 0)
 		panic("sys_page_alloc, %e", r);
 	memmove((void *)PFTEMP, addr, PGSIZE);
 	// remap the addr with newly allocated writable page
-	if  ((r = sys_page_map(envid, PFTEMP, envid, addr, PTE_P | PTE_U | PTE_W)) != 0)
+	if ((r = sys_page_map(0, PFTEMP, 0, addr, PTE_P | PTE_U | PTE_W)) != 0)
 		panic("sys_page_map, %e, fault addr 0x%x", r, addr);
+	if ((r = sys_page_unmap(0, PFTEMP)) != 0)
+		panic("sys_page_unmap, %e", r);
 }
 
 //
@@ -71,23 +73,27 @@ duppage(envid_t envid, unsigned pn)
 
 	// LAB 4: Your code here.
 	int perm = PTE_P | PTE_U;	// at least PTE_P and PTE_U
-	envid_t curenvid = sys_getenvid();
+	// envid_t curenvid = sys_getenvid();
 
 	int is_wr = (uvpt[pn] & PTE_W) == PTE_W;
 	int is_cow = (uvpt[pn] & PTE_COW) == PTE_COW;
+	int is_shared = (uvpt[pn] & PTE_SHARE);
+
 	void *addr = (void *)(pn * PGSIZE);
-	if (is_wr || is_cow)
+	if ((is_wr || is_cow) && !is_shared)
 	{
 		// create new mapping
-		if ((r = sys_page_map(curenvid, addr, envid, addr, perm | PTE_COW)) != 0)
+		if ((r = sys_page_map(0, addr, envid, addr, perm | PTE_COW)) != 0)
 			panic("sys_page_map, %e", r);
-		if ((r = sys_page_map(curenvid, addr, curenvid, addr, perm | PTE_COW)) != 0)
+		if ((r = sys_page_map(0, addr, 0, addr, perm | PTE_COW)) != 0)
 			panic("sys_page_map, %e", r);
 	}
 	else
 	{
+		if (is_shared)
+			perm = PTE_SYSCALL & uvpt[pn];
 		// only remap child without PTE_COW
-		if ((r = sys_page_map(curenvid, addr, envid, addr, perm)) != 0)
+		if ((r = sys_page_map(0, addr, envid, addr, perm)) != 0)
 			panic("sys_page_map, %e", r);
 	}
 	return 0;

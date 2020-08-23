@@ -274,6 +274,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	env_free_list = e->env_link;
 	*newenv_store = e;
 
+	// slient this line
 	// cprintf("[%08x] new env %08x\n", curenv ? curenv->env_id : 0, e->env_id);
 	return 0;
 }
@@ -420,6 +421,8 @@ env_create(uint8_t *binary, enum EnvType type)
 	if (env_alloc(&new_env, 0) != 0)
 		panic("env_alloc");
 	load_icode(new_env, binary);
+	if (type == ENV_TYPE_FS)
+		new_env->env_tf.tf_eflags |= FL_IOPL_3;
 	new_env->env_type = type;
 }
 
