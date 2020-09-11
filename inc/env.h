@@ -35,7 +35,8 @@ enum {
 	ENV_DYING,
 	ENV_RUNNABLE,
 	ENV_RUNNING,
-	ENV_NOT_RUNNABLE
+	ENV_NOT_RUNNABLE,
+	ENV_IDE_SLEEPING
 };
 
 // Special environment types
@@ -67,6 +68,10 @@ struct Env {
 	uint32_t env_ipc_value;		// Data value sent to us
 	envid_t env_ipc_from;		// envid of the sender
 	int env_ipc_perm;		// Perm of page mapping received
+
+	// Lab 5 FS
+	void *chan;				// sleep on channel (0 means write, otherwise read)
+	int op;				// read 0, write 1
 };
 
 #endif // !JOS_INC_ENV_H

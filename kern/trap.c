@@ -239,20 +239,52 @@ trap_dispatch(struct Trapframe *tf)
 	// LAB 4: Your code here.
 	if (tf->tf_trapno >= IRQ_OFFSET && tf->tf_trapno < IRQ_OFFSET + 16)
 	{
-		lapic_eoi();
 		switch (tf->tf_trapno)
 		{
 		case IRQ_OFFSET + IRQ_TIMER:
+			lapic_eoi();
 			sched_yield();
 			break;
 
 		case IRQ_OFFSET + IRQ_KBD:
 			kbd_intr();
+			lapic_eoi();
 			return;
 
 		case IRQ_OFFSET + IRQ_SERIAL:
 			serial_intr();
+			lapic_eoi();
 			return;
+
+		case IRQ_OFFSET + IRQ_IDE:
+			for (int i = 0; i < NENV; i++)
+			{
+				if (envs[i].env_type == ENV_TYPE_FS)
+				{
+					// read a BLKSIZE from disk if needed then acknowledge the interrupt
+					if (envs[i].op == 0)
+					{
+						lcr3(PADDR(envs[i].env_pgdir));
+						insl(0x1F0, envs[i].chan, PGSIZE / 4);
+						envs[i].chan = 0;
+						lcr3(PADDR(kern_pgdir));
+					}
+					// OCW2: send non-specific EOI command to give driver an ACK
+					// otherwise we won't receive the rest IDE interrupts followed
+					outb(IO_PIC1, 0x20);
+					outb(IO_PIC2, 0x20);
+					// finally, make fs runnable
+					if (envs[i].env_status == ENV_IDE_SLEEPING)
+						envs[i].env_status = ENV_RUNNABLE;
+					else
+					{
+						// shouldn't be here
+						cprintf("status: %u\n", envs[i].env_status);
+						print_trapframe(tf);
+					}
+					return;
+				}
+			}
 		
 		default:
 			break;
@@ -434,6 +466,7 @@ page_fault_handler(struct Trapframe *tf)
 	utf->utf_eflags = tf->tf_eflags;
 	utf->utf_esp = tf->tf_esp;
 
+	// page fault exception handler thread
 	tf->tf_esp = (uintptr_t)&utf->utf_fault_va;
 	tf->tf_eip = (uintptr_t)curenv->env_pgfault_upcall;
 	env_run(curenv);

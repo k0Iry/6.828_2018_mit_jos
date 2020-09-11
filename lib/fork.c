@@ -63,6 +63,11 @@ pgfault(struct UTrapframe *utf)
 // copy-on-write again if it was already copy-on-write at the beginning of
 // this function?)
 //
+// Answer of above exercise question:
+// *If the beginning it is CoW, and then it faults, marked as PTE_W, then
+// we'll corrupt the child's copy when this page is being written by parent
+// after this, and the 'snapshot' misfunction*
+//
 // Returns: 0 on success, < 0 on error.
 // It is also OK to panic on error.
 //
@@ -73,7 +78,6 @@ duppage(envid_t envid, unsigned pn)
 
 	// LAB 4: Your code here.
 	int perm = PTE_P | PTE_U;	// at least PTE_P and PTE_U
-	// envid_t curenvid = sys_getenvid();
 
 	int is_wr = (uvpt[pn] & PTE_W) == PTE_W;
 	int is_cow = (uvpt[pn] & PTE_COW) == PTE_COW;

@@ -394,6 +394,25 @@ sys_time_msec(void)
 	panic("sys_time_msec not implemented");
 }
 
+static void
+sys_ide_sleep(void *chan, size_t nsecs, int op)
+{
+	int r;
+	if (op == 0)
+	{
+		outb(0x1F7, nsecs > 1 ? 0xc4 : 0x20);	// CMD 0x20 means read sector
+	}
+	else
+	{
+		outb(0x1F7, nsecs > 1 ? 0xc5 : 0x30);	// CMD 0x30 means write sector
+		outsl(0x1F0, chan, PGSIZE / 4);
+	}
+	curenv->chan = chan;
+	curenv->env_status = ENV_IDE_SLEEPING;
+	curenv->op = op;
+	sched_yield();
+}
+
 // Dispatches to the correct kernel function, passing the arguments.
 int32_t
 syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5)
@@ -434,6 +453,8 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 		return sys_ipc_try_send(a1, a2, (void *)a3, a4);
 	case SYS_ipc_recv:
 		return sys_ipc_recv((void *)a1);
+	case SYS_ide_sleep:
+		sys_ide_sleep((void *)a1, a2, (int)a3);
 	case NSYSCALLS:
 	default:
 		return -E_INVAL;

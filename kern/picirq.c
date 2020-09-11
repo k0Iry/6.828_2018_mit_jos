@@ -11,10 +11,16 @@
 uint16_t irq_mask_8259A = 0xFFFF & ~(1<<IRQ_SLAVE);
 static bool didinit;
 
-/* Initialize the 8259A interrupt controllers. */
+/* Initialize the 8259A interrupt controllers.
+ * https://k.lse.epita.fr/internals/8259a_controller.html
+*/
 void
 pic_init(void)
 {
+	// init ide disk interrupt
+	// for simplicity we init ide's irq just before pic init
+	// otherwise we might do it in IOAPIC
+	irq_setmask_8259A(irq_mask_8259A & ~(1<<IRQ_IDE));
 	didinit = 1;
 
 	// mask all interrupts
@@ -48,7 +54,7 @@ pic_init(void)
 
 	// Set up slave (8259A-2)
 	outb(IO_PIC2, 0x11);			// ICW1
-	outb(IO_PIC2+1, IRQ_OFFSET + 8);	// ICW2
+	outb(IO_PIC2+1, IRQ_OFFSET + 8);	// ICW2	base = 40, IDE will be taken care from slave
 	outb(IO_PIC2+1, IRQ_SLAVE);		// ICW3
 	// NB Automatic EOI mode doesn't tend to work on the slave.
 	// Linux source code says it's "to be investigated".

@@ -59,7 +59,6 @@ ide_set_disk(int d)
 	diskno = d;
 }
 
-
 int
 ide_read(uint32_t secno, void *dst, size_t nsecs)
 {
@@ -74,13 +73,11 @@ ide_read(uint32_t secno, void *dst, size_t nsecs)
 	outb(0x1F4, (secno >> 8) & 0xFF);
 	outb(0x1F5, (secno >> 16) & 0xFF);
 	outb(0x1F6, 0xE0 | ((diskno&1)<<4) | ((secno>>24)&0x0F));
-	outb(0x1F7, 0x20);	// CMD 0x20 means read sector
 
-	for (; nsecs > 0; nsecs--, dst += SECTSIZE) {
-		if ((r = ide_wait_ready(1)) < 0)
-			return r;
-		insl(0x1F0, dst, SECTSIZE/4);
-	}
+	// between issuing disk cmd and set to sleep, there might be a timer IRQ
+	// comes in, and fs -> RUNNABLE, then disk IRQ comes, and we handle it
+	// then fs goes to sleep, with CPU halted, we missed wake up
+	sys_ide_sleep(dst, nsecs, 0);
 
 	return 0;
 }
@@ -99,14 +96,22 @@ ide_write(uint32_t secno, const void *src, size_t nsecs)
 	outb(0x1F4, (secno >> 8) & 0xFF);
 	outb(0x1F5, (secno >> 16) & 0xFF);
 	outb(0x1F6, 0xE0 | ((diskno&1)<<4) | ((secno>>24)&0x0F));
-	outb(0x1F7, 0x30);	// CMD 0x30 means write sector
 
-	for (; nsecs > 0; nsecs--, src += SECTSIZE) {
-		if ((r = ide_wait_ready(1)) < 0)
-			return r;
-		outsl(0x1F0, src, SECTSIZE/4);
-	}
+	sys_ide_sleep((void *)src, nsecs, 1);
 
 	return 0;
 }
 
+/* 
+
+0. non-fs env raises a fs request and sleep
+1. fs might issue read/write command
+2. fs goes to sleep and yields the CPU
+3. disk irq comes, fs wakes up
+4. fs in turn wakes up env that waits
+5. fs serv goes for another run
+
+So basically we can only handle one IRQ each
+time (since fs env will sleep after each disk command),
+we can support concurrency by implementing 'thread' in JOS
+*/

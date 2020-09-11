@@ -163,3 +163,10 @@ sys_time_msec(void)
 {
 	return (unsigned int) syscall(SYS_time_msec, 0, 0, 0, 0, 0, 0);
 }
+
+void
+sys_ide_sleep(void *chan, size_t nsecs, int op)
+{
+	// can't use sysenter, since we need to restore our flags from trapframe
+	syscall(SYS_ide_sleep, 0, (uint32_t)chan, nsecs, (uint32_t)op, 0, 0);
+}
