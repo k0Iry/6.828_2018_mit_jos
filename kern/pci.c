@@ -4,6 +4,7 @@
 #include <kern/pci.h>
 #include <kern/pcireg.h>
 #include <kern/e1000.h>
+#include <kern/pmap.h>
 
 // Flag to do "lspci" at bootup
 static int pci_show_devs = 1;
@@ -15,6 +16,7 @@ static uint32_t pci_conf1_data_ioport = 0x0cfc;
 
 // Forward declarations
 static int pci_bridge_attach(struct pci_func *pcif);
+extern int pci_func_attach(struct pci_func *pcif);
 
 // PCI driver table
 struct pci_driver {
@@ -31,6 +33,7 @@ struct pci_driver pci_attach_class[] = {
 // pci_attach_vendor matches the vendor ID and device ID of a PCI device. key1
 // and key2 should be the vendor ID and device ID respectively
 struct pci_driver pci_attach_vendor[] = {
+	{ E1000_VENDOR_ID, E1000_DEVICE_ID, &pci_func_attach },
 	{ 0, 0, 0 },
 };
 
@@ -233,6 +236,9 @@ pci_func_enable(struct pci_func *f)
 		f->reg_base[regnum] = base;
 		f->reg_size[regnum] = size;
 
+		if (regnum == 0)
+			e1000_bar0 = mmio_map_region(base, size);
+
 		if (size && !base)
 			cprintf("PCI device %02x:%02x.%d (%04x:%04x) "
 				"may be misconfigured: "
@@ -245,6 +251,8 @@ pci_func_enable(struct pci_func *f)
 	cprintf("PCI function %02x:%02x.%d (%04x:%04x) enabled\n",
 		f->bus->busno, f->dev, f->func,
 		PCI_VENDOR(f->dev_id), PCI_PRODUCT(f->dev_id));
+	cprintf("Device status for E1000 BAR 0 is 0x%x\n",
+		e1000_bar0[E1000_STATUS]);
 }
 
 int

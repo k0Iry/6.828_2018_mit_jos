@@ -13,4 +13,20 @@ input(envid_t ns_envid)
 	// Hint: When you IPC a page to the network server, it will be
 	// reading from it for a while, so don't immediately receive
 	// another packet in to the same physical page.
+	int r;
+	// trigger a page fault in user space, otherwise we will fault in kernel mode....
+	nsipcbuf.pkt.jp_data[0] = '\0';
+
+	while (1)
+	{
+		while ((r = sys_recv(nsipcbuf.pkt.jp_data, 1518)) == 0) sys_yield();
+		if (r > 0)
+		{
+			nsipcbuf.pkt.jp_len = r;
+			ipc_send(ns_envid, NSREQ_INPUT, (void *)&nsipcbuf, PTE_P|PTE_W|PTE_U);
+			// we just enabled our parent env, yield a bit waiting for it to run
+			for (int i = 0; i < 10; i++)
+				sys_yield();
+		}
+	}
 }

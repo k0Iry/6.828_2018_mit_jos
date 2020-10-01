@@ -242,6 +242,7 @@ trap_dispatch(struct Trapframe *tf)
 		switch (tf->tf_trapno)
 		{
 		case IRQ_OFFSET + IRQ_TIMER:
+			time_tick();
 			lapic_eoi();
 			sched_yield();
 			break;
@@ -295,10 +296,6 @@ trap_dispatch(struct Trapframe *tf)
 	// Be careful! In multiprocessors, clock interrupts are
 	// triggered on every CPU.
 	// LAB 6: Your code here.
-
-
-	// Handle keyboard and serial interrupts.
-	// LAB 5: Your code here.
 
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);

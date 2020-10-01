@@ -22,7 +22,9 @@ umain(int argc, char **argv)
 	int i;
 
 	// Wait for the console to calm down
-	for (i = 0; i < 50; i++)
+	// since I enabled disk interrupt, so count down will not be
+	// continous sometimes, so increase the yielding times
+	for (i = 0; i < 1000; i++)
 		sys_yield();
 
 	cprintf("starting count down: ");

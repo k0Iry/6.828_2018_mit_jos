@@ -12,6 +12,7 @@
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>
+#include <kern/e1000.h>
 
 // Print a string to the system console.
 // The string is exactly 'len' characters long.
@@ -391,7 +392,7 @@ static int
 sys_time_msec(void)
 {
 	// LAB 6: Your code here.
-	panic("sys_time_msec not implemented");
+	return time_msec();
 }
 
 static void
@@ -411,6 +412,20 @@ sys_ide_sleep(void *chan, size_t nsecs, int op)
 	curenv->env_status = ENV_IDE_SLEEPING;
 	curenv->op = op;
 	sched_yield();
+}
+
+static int
+sys_send(const void *buffer, size_t length)
+{
+	user_mem_assert(curenv, buffer, length, PTE_U);
+	return (int)e1000_transmit(buffer, length);
+}
+
+static int
+sys_recv(void *buffer, size_t length)
+{
+	user_mem_assert(curenv, buffer, length, PTE_U);
+	return (int)e1000_receive(buffer, length);
 }
 
 // Dispatches to the correct kernel function, passing the arguments.
@@ -453,8 +468,14 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 		return sys_ipc_try_send(a1, a2, (void *)a3, a4);
 	case SYS_ipc_recv:
 		return sys_ipc_recv((void *)a1);
+	case SYS_time_msec:
+		return sys_time_msec();
 	case SYS_ide_sleep:
 		sys_ide_sleep((void *)a1, a2, (int)a3);
+	case SYS_send:
+		return sys_send((const void*)a1, a2);
+	case SYS_recv:
+		return sys_recv((void *)a1, a2);
 	case NSYSCALLS:
 	default:
 		return -E_INVAL;

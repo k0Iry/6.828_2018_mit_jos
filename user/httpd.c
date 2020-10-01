@@ -77,7 +77,29 @@ static int
 send_data(struct http_request *req, int fd)
 {
 	// LAB 6: Your code here.
-	panic("send_data not implemented");
+	// panic("send_data not implemented");
+	struct Stat stat;
+	int r;
+	if ((r = fstat(fd, &stat)) < 0)
+		panic("FSTAT: %e", r);
+	int length = stat.st_size;
+	char buffer[BUFFSIZE];
+	int offset;
+	for (offset = 0; offset < length; offset += BUFFSIZE)
+	{
+		memset(buffer, 0, BUFFSIZE);
+		if ((r = readn(fd, buffer, BUFFSIZE)) < 0)
+			panic("readn, %e", r);
+		write(req->sock, buffer, BUFFSIZE);
+	}
+
+	int remain = length - (offset - BUFFSIZE);
+	memset(buffer, 0, BUFFSIZE);
+	if ((r = readn(fd, buffer, remain)) < 0)
+			panic("readn, %e", r);
+	write(req->sock, buffer, remain);
+
+	return r;
 }
 
 static int
@@ -223,12 +245,18 @@ send_file(struct http_request *req)
 	// set file_size to the size of the file
 
 	// LAB 6: Your code here.
-	panic("send_file not implemented");
+	// panic("send_file not implemented");
+	struct Stat statbuf;
+	if ((r = stat(req->url, &statbuf)) < 0 || statbuf.st_isdir == 1)
+		return send_error(req, 404);
+
+	if ((fd = open(req->url, O_RDONLY)) < 0)
+		goto end;
 
 	if ((r = send_header(req, 200)) < 0)
 		goto end;
 
-	if ((r = send_size(req, file_size)) < 0)
+	if ((r = send_size(req, statbuf.st_size)) < 0)
 		goto end;
 
 	if ((r = send_content_type(req)) < 0)
