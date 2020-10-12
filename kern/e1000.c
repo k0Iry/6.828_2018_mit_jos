@@ -2,6 +2,8 @@
 #include <kern/pmap.h>
 #include <kern/pci.h>
 #include <inc/string.h>
+#include <kern/env.h>
+#include <kern/picirq.h>
 
 // LAB 6: Your driver code here
 
@@ -26,6 +28,15 @@
 #define E1000_TXD_CMD_EOP    0x01000000 /* End of Packet */
 #define E1000_TXD_STAT_DD    0x00000001 /* Descriptor Done */
 
+// interrupt-driven
+#define E1000_ICR      (0x000C0/4)  /* Interrupt Cause Read - R/clr */
+    #define E1000_ICR_TXDW          0x00000001 /* Transmit desc written back */
+
+#define E1000_IMS      (0x000D0/4)  /* Interrupt Mask Set - RW */
+    #define E1000_IMS_TXDW      E1000_ICR_TXDW      /* Transmit desc written back */
+
+#define E1000_IMC      0x000D8  /* Interrupt Mask Clear - WO */
+
 // RX
 #define E1000_RDBAL    (0x02800/4)  /* RX Descriptor Base Address Low - RW */
 #define E1000_RDBAH    (0x02804/4)  /* RX Descriptor Base Address High - RW */
@@ -37,7 +48,6 @@
 #define E1000_RAL      (0x05400/4)  /* Receive Address Low - RW Array */
 #define E1000_RAH      (0x05404/4)  /* Receive Address High - RW Array */
 #define E1000_RAH_AV  0x80000000        /* Receive descriptor valid */
-#define E1000_IMS      (0x000D0/4)  /* Interrupt Mask Set - RW */
 
 #define E1000_RXD_STAT_DD       0x01    /* Descriptor Done */
 #define E1000_RXD_STAT_EOP      0x02    /* End of Packet */
@@ -79,6 +89,8 @@ struct rx_desc {
 
 struct tx_desc tdesc[64];  // TDESC ring buffer, max 64
 struct rx_desc rdesc[128]; // RDESC ring buffer, min 128
+
+volatile uint32_t *e1000_bar0;      // memory mapped E1000 device registers
 
 static void init_tx()
 {
@@ -135,8 +147,6 @@ static void init_rx()
     e1000_bar0[E1000_MTA + 1] = 0;
     e1000_bar0[E1000_MTA + 2] = 0;
     e1000_bar0[E1000_MTA + 3] = 0;
-    // not enable IRQ for now
-    e1000_bar0[E1000_IMS] = 0;
     e1000_bar0[E1000_RCTL] = E1000_RCTL_EN | E1000_RCTL_SECRC | E1000_RCTL_SZ_2048 | E1000_RCTL_BAM;
 }
 
@@ -144,6 +154,11 @@ static void init_rx()
 int pci_func_attach(struct pci_func *pcif)
 {
     pci_func_enable(pcif);
+    e1000_bar0 = mmio_map_region(pcif->reg_base[0], pcif->reg_size[0]);
+    cprintf("Device status for E1000 BAR 0 is 0x%x\n",
+		e1000_bar0[E1000_STATUS]);
+    // enable pci interrupts
+	irq_setmask_8259A(irq_mask_8259A & ~(1<<pcif->irq_line));
 
     init_tx();
     init_rx();
@@ -175,6 +190,10 @@ size_t e1000_transmit(const void *buffer, size_t size)
     }
     // require for re-transmission
     cprintf("lost packet 0x%x\n", buffer);
+    e1000_bar0[E1000_IMS] |= E1000_IMS_TXDW;
+    curenv->env_status = ENV_NS_WAITING;
+    extern void sched_yield();
+    sched_yield();
     return 0;
 }
 
@@ -205,4 +224,14 @@ size_t e1000_receive(void *buffer, size_t size)
     e1000_bar0[E1000_RDT] = current;
     
     return length;
+}
+
+// interrupt handler for transmit full queue or receive empty queue
+void e1000_intr()
+{
+    if (e1000_bar0[E1000_ICR] & E1000_ICR_TXDW)
+    {
+        cprintf("E1000_ICR_TXDW\n");
+    }
+    e1000_bar0[E1000_IMC] = ~0b0;
 }

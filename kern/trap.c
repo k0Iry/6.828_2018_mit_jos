@@ -14,6 +14,7 @@
 #include <kern/cpu.h>
 #include <kern/spinlock.h>
 #include <kern/time.h>
+#include <kern/e1000.h>
 
 static struct Taskstate ts;
 
@@ -286,6 +287,11 @@ trap_dispatch(struct Trapframe *tf)
 					return;
 				}
 			}
+		
+		case IRQ_OFFSET + 11:
+		    e1000_intr();
+			lapic_eoi();
+			return;
 		
 		default:
 			break;

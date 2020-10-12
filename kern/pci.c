@@ -4,7 +4,6 @@
 #include <kern/pci.h>
 #include <kern/pcireg.h>
 #include <kern/e1000.h>
-#include <kern/pmap.h>
 
 // Flag to do "lspci" at bootup
 static int pci_show_devs = 1;
@@ -236,9 +235,6 @@ pci_func_enable(struct pci_func *f)
 		f->reg_base[regnum] = base;
 		f->reg_size[regnum] = size;
 
-		if (regnum == 0)
-			e1000_bar0 = mmio_map_region(base, size);
-
 		if (size && !base)
 			cprintf("PCI device %02x:%02x.%d (%04x:%04x) "
 				"may be misconfigured: "
@@ -251,8 +247,6 @@ pci_func_enable(struct pci_func *f)
 	cprintf("PCI function %02x:%02x.%d (%04x:%04x) enabled\n",
 		f->bus->busno, f->dev, f->func,
 		PCI_VENDOR(f->dev_id), PCI_PRODUCT(f->dev_id));
-	cprintf("Device status for E1000 BAR 0 is 0x%x\n",
-		e1000_bar0[E1000_STATUS]);
 }
 
 int

@@ -8,10 +8,9 @@
 
 #define E1000_STATUS   (0x00008/4)  /* Device Status - RO */
 
-volatile uint32_t *e1000_bar0;      // memory mapped E1000 device registers
-
 size_t e1000_transmit(const void *buffer, size_t size);
 size_t e1000_receive(void *buffer, size_t size);
+void e1000_intr();
 
 
 #endif  // SOL >= 6
